@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Редактор скриншота заказа</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap">
+<style>
+  :root{
+    --bg:#15171a; --card:#1f2327; --card-2:#282d32; --line:#363c42;
+    --ink:#f0f2f4; --muted:#98a4ac; --orange:#ff8420; --green:#1f8a58;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+    --ui:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);font-size:17px;line-height:1.4;
+    -webkit-font-smoothing:antialiased}
+
+  /* ── холст ── */
+  .stage{position:sticky;top:0;z-index:5;height:44vh;min-height:240px;background:#101214;
+    border-bottom:1px solid var(--line);display:flex;flex-direction:column}
+  .stage-bar{display:flex;gap:8px;align-items:center;padding:8px 12px;
+    padding-top:max(8px,env(safe-area-inset-top))}
+  .stage-bar .ttl{font-weight:700;font-size:15px;margin-right:auto}
+  .stage-bar .ttl b{color:var(--orange)}
+  .canvas-wrap{flex:1;position:relative;overflow:hidden;display:grid;place-items:center;min-height:0;
+    touch-action:none;user-select:none;-webkit-user-select:none}
+  .canvas-wrap.picking,.canvas-wrap.marquee{cursor:crosshair}
+  canvas#view{display:block;box-shadow:0 10px 30px rgba(0,0,0,.5);background:#fff}
+  .empty{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;
+    padding:18px;text-align:center;pointer-events:none}
+  .empty strong{font-size:16px;display:block;margin-bottom:6px}
+  .empty .hint{color:var(--muted);font-size:14px;max-width:32ch;margin:0}
+  .marq{position:absolute;border:2px dashed var(--orange);background:rgba(255,132,32,.14);
+    display:none;pointer-events:none;z-index:4;border-radius:3px}
+  .loupe{position:absolute;width:128px;height:128px;border-radius:50%;pointer-events:none;
+    border:3px solid var(--orange);box-shadow:0 8px 24px rgba(0,0,0,.6);display:none;z-index:7;image-rendering:pixelated}
+  .loupe canvas{display:block;width:100%;height:100%;border-radius:50%}
+  .loupe::after{content:"";position:absolute;left:50%;top:50%;width:10px;height:10px;
+    transform:translate(-50%,-50%);border:2px solid #fff;mix-blend-mode:difference}
+  .loupe-hex{position:absolute;left:50%;bottom:-24px;transform:translateX(-50%);font-family:var(--mono);
+    font-size:12px;background:var(--card);border:1px solid var(--line);padding:2px 7px;border-radius:6px;white-space:nowrap}
+  .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(20px);
+    background:var(--orange);color:#171009;font-weight:600;font-size:15px;padding:11px 18px;border-radius:24px;
+    opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;z-index:50;max-width:90vw;text-align:center}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  /* ── страница ── */
+  main{padding:14px;display:flex;flex-direction:column;gap:14px;max-width:640px;margin:0 auto;
+    padding-bottom:calc(28px + env(safe-area-inset-bottom))}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+  .card > h2{margin:0;padding:13px 16px;font-size:13px;font-weight:600;letter-spacing:.04em;
+    text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line);
+    display:flex;align-items:center;gap:10px}
+  .card > h2 .btn{margin-left:auto;text-transform:none;letter-spacing:0}
+  .body{padding:14px 16px}
+
+  .btn{font:inherit;font-size:16px;font-weight:600;min-height:52px;padding:0 14px;border-radius:13px;
+    background:var(--card-2);color:var(--ink);border:1px solid var(--line);cursor:pointer;
+    display:inline-flex;align-items:center;justify-content:center;gap:8px;text-align:center}
+  .btn:active{background:#333a41}
+  .btn.on{background:rgba(255,132,32,.18);border-color:var(--orange);color:#ffbb7d}
+  .btn.wide{width:100%}
+  .btn.big{min-height:60px;font-size:18px}
+  .btn.go{background:var(--green);border-color:#2aa96e;color:#fff}
+  .btn.sm{min-height:40px;font-size:14px;padding:0 11px;border-radius:11px}
+  .btn:disabled{opacity:.4}
+  :focus-visible{outline:3px solid var(--orange);outline-offset:2px}
+  .tools{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+  input[type=file]{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden}
+  #num{width:100%;font-family:var(--mono);font-size:34px;font-weight:700;letter-spacing:.08em;text-align:center;
+    background:transparent;border:2px solid var(--line);border-radius:14px;color:var(--ink);padding:12px;min-height:66px}
+  #tpl{width:100%;font-family:var(--ui);font-size:17px;background:var(--card-2);border:1px solid var(--line);
+    border-radius:12px;color:var(--ink);padding:12px;min-height:76px;resize:vertical;line-height:1.4}
+  .hint{color:var(--muted);font-size:14.5px;line-height:1.5;margin:11px 0 0}
+  .hint code{font-family:var(--mono);font-size:13.5px;color:#c3ced5}
+
+  /* список слоёв */
+  .layer{display:flex;align-items:center;gap:12px;padding:0 16px;min-height:64px;
+    border-bottom:1px solid var(--line);cursor:pointer}
+  .layer:last-child{border-bottom:none}
+  .layer[aria-selected="true"]{background:rgba(255,132,32,.13);box-shadow:inset 3px 0 0 var(--orange)}
+  .layer .idx{font-family:var(--mono);font-size:13px;color:var(--muted);width:22px;flex:none}
+  .layer[aria-selected="true"] .idx{color:var(--orange)}
+  .layer .nm{flex:1;font-size:16.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .layer .sw{width:22px;height:22px;border-radius:6px;border:1px solid rgba(255,255,255,.25);flex:none}
+  .layer input[type=checkbox]{appearance:none;-webkit-appearance:none;margin:0;flex:none;
+    width:52px;height:31px;border-radius:16px;background:#3b4147;position:relative;transition:background .15s}
+  .layer input[type=checkbox]::after{content:"";position:absolute;top:3px;left:3px;width:25px;height:25px;
+    border-radius:50%;background:#fff;transition:transform .15s}
+  .layer input[type=checkbox]:checked{background:var(--green)}
+  .layer input[type=checkbox]:checked::after{transform:translateX(21px)}
+
+  /* степперы и крестовина */
+  .st{display:flex;align-items:center;gap:10px;margin-top:12px}
+  .st .lb{flex:1;font-size:16px;color:var(--muted)}
+  .st .lb small{display:block;font-size:13px;opacity:.8}
+  .st .val{font-family:var(--mono);font-size:17px;min-width:56px;text-align:center;font-weight:600}
+  .st .btn{width:52px;min-width:52px;height:52px;font-size:26px;padding:0}
+  .dpad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+  .dpad .btn{height:60px;font-size:23px;padding:0}
+  .dpad .mid{display:grid;place-items:center;font-family:var(--mono);font-size:14px;color:var(--muted);
+    border:1px dashed var(--line);border-radius:13px}
+
+  .colors{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+  .col{background:var(--card-2);border:1px solid var(--line);border-radius:13px;padding:12px;text-align:center}
+  .col > span{display:block;font-size:13.5px;color:var(--muted);margin-bottom:9px}
+  input[type=color]{width:100%;height:44px;padding:0;border:1px solid var(--line);border-radius:10px;background:none}
+  .col .btn{margin-top:9px;width:100%;min-height:44px;font-size:15px}
+
+  details{border-top:1px solid var(--line);margin-top:16px;padding-top:6px}
+  summary{font-size:16px;color:var(--muted);min-height:48px;display:flex;align-items:center;cursor:pointer}
+  .adv{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding-bottom:6px}
+  .adv label.f{display:flex;flex-direction:column;gap:6px;font-size:13.5px;color:var(--muted)}
+  .adv input,.adv select{font-family:var(--mono);font-size:16px;background:var(--card-2);
+    border:1px solid var(--line);border-radius:11px;color:var(--ink);padding:11px;min-height:48px;width:100%}
+  .adv .full{grid-column:1 / -1}
+  .savebar{display:flex;gap:10px;align-items:stretch}
+  .savebar .btn{flex:1}
+  #scaleSel{font-family:var(--mono);font-size:16px;background:var(--card-2);border:1px solid var(--line);
+    border-radius:13px;color:var(--ink);padding:0 12px;min-height:60px;flex:none}
+  #dims{font-family:var(--mono);font-size:13px;color:var(--muted);text-align:center;display:block;margin-top:10px}
+
+  @media (min-width:760px){ .stage{height:56vh} }
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<div class="stage">
+  <div class="stage-bar">
+    <div class="ttl">Редактор скриншота <b>заказа</b></div>
+    <button class="btn sm" id="cmpBtn">До/после</button>
+    <button class="btn sm" id="fitBtn">Вписать</button>
+  </div>
+  <div class="canvas-wrap" id="wrap">
+    <canvas id="view"></canvas>
+    <div class="marq" id="marq"></div>
+    <div class="empty" id="empty">
+      <div>
+        <strong>Скриншот не выбран</strong>
+        <p class="hint">Нажми «Открыть скриншот» ниже. Слои встанут по местам и сами подгонятся по пикселям.</p>
+      </div>
+    </div>
+    <div class="loupe" id="loupe"><canvas id="loupeC" width="128" height="128"></canvas><div class="loupe-hex" id="loupeHex">#000000</div></div>
+  </div>
+</div>
+
+<main>
+  <input type="file" id="file" accept="image/*,.png,.jpg,.jpeg">
+  <label class="btn big wide go" for="file">Открыть скриншот</label>
+
+  <div class="card">
+    <h2>Инструменты</h2>
+    <div class="body">
+      <div class="tools">
+        <button class="btn" id="fitAllBtn">Подогнать всё</button>
+        <button class="btn" id="marqBtn">Обвести текст</button>
+        <button class="btn" id="eyeBtn">Пипетка</button>
+        <button class="btn on" id="boxBtn">Рамки</button>
+      </div>
+      <p class="hint">«Подогнать всё» снимает с пикселей позицию, кегль и цвета. «Обвести текст» создаёт слой поверх любой надписи.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Номер заказа</h2>
+    <div class="body">
+      <input id="num" value="6314" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <p class="hint">Подставляется в слои с <code>{n}</code>. Можно вписывать и буквы. Ещё есть <code>{дата}</code> и <code>{время}</code> — берут текущие.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Что меняем <button class="btn sm" id="addBtn">+ Слой</button></h2>
+    <div class="layers" id="layers"></div>
+  </div>
+
+  <div class="card" id="editor" hidden>
+    <h2 id="edTitle">Слой</h2>
+    <div class="body">
+      <textarea id="tpl" rows="2" placeholder="{n}, слово или адрес"></textarea>
+
+      <div class="st">
+        <span class="lb">Кегль</span>
+        <button class="btn" data-inc="size,-1">−</button>
+        <span class="val" id="vSize">0</span>
+        <button class="btn" data-inc="size,1">+</button>
+      </div>
+
+      <div class="dpad">
+        <button class="btn" data-nudge="-1,0">←</button>
+        <button class="btn" data-nudge="0,-1">↑</button>
+        <button class="btn" data-nudge="1,0">→</button>
+        <button class="btn" id="stepBtn">шаг 1 px</button>
+        <button class="btn" data-nudge="0,1">↓</button>
+        <div class="mid" id="posLbl">0, 0</div>
+      </div>
+
+      <div class="colors">
+        <div class="col"><span>Цвет текста</span><input type="color" id="lcolor">
+          <button class="btn" data-pick="color">Взять с фото</button></div>
+        <div class="col"><span>Цвет заливки</span><input type="color" id="lfill">
+          <button class="btn" data-pick="fill">Взять с фото</button></div>
+      </div>
+
+      <div class="st">
+        <span class="lb">Заплатка вниз<small>хвосты букв у, д, р</small></span>
+        <button class="btn" data-inc="padb,-1">−</button>
+        <span class="val" id="vPadb">0</span>
+        <button class="btn" data-inc="padb,1">+</button>
+      </div>
+      <div class="st">
+        <span class="lb">Заплатка вправо</span>
+        <button class="btn" data-inc="padr,-1">−</button>
+        <span class="val" id="vPadr">0</span>
+        <button class="btn" data-inc="padr,1">+</button>
+      </div>
+
+      <div class="two" style="margin-top:14px">
+        <button class="btn" id="fitSelBtn">Подогнать слой</button>
+        <button class="btn" id="clrCoverBtn">Снять область</button>
+      </div>
+      <div class="two" style="margin-top:10px">
+        <button class="btn" id="delBtn">Удалить слой</button>
+        <button class="btn" id="resetBtn">Сброс всех</button>
+      </div>
+
+      <details>
+        <summary>Дополнительно</summary>
+        <div class="adv">
+          <label class="f"><span>Гарнитура</span>
+            <select id="lfam">
+              <option value="Roboto, system-ui, sans-serif">Roboto</option>
+              <option value="-apple-system, BlinkMacSystemFont, sans-serif">SF Pro (iOS)</option>
+              <option value="Arial, Helvetica, sans-serif">Arial</option>
+              <option value="'PT Sans', sans-serif">PT Sans</option>
+              <option value="Verdana, sans-serif">Verdana</option>
+            </select>
+          </label>
+          <label class="f"><span>Жирность</span>
+            <select id="lweight"><option>400</option><option>500</option><option>600</option><option>700</option><option>800</option><option>900</option></select>
+          </label>
+          <label class="f"><span>Привязка</span>
+            <select id="lalign"><option value="left">слева</option><option value="center">по центру</option><option value="right">справа</option></select>
+          </label>
+          <label class="f"><span>Кегль</span><input type="number" id="lsize" step="1"></label>
+          <label class="f"><span>X</span><input type="number" id="lx" step="1"></label>
+          <label class="f"><span>Y базовой линии</span><input type="number" id="ly" step="1"></label>
+          <label class="f"><span>Трекинг</span><input type="number" id="ltrack" step="0.5"></label>
+          <label class="f"><span>Ширина букв, %</span><input type="number" id="lscale" step="1"></label>
+          <label class="f"><span>Перенос, px</span><input type="number" id="lwrap" step="5"></label>
+          <label class="f"><span>Интерлиньяж</span><input type="number" id="llh" step="0.01"></label>
+          <label class="f"><span>Строк перекрыть</span><input type="number" id="lminl" step="1" min="1"></label>
+          <label class="f"><span>Заплатка ←</span><input type="number" id="lpadl" step="1"></label>
+          <label class="f"><span>Заплатка →</span><input type="number" id="lpadr" step="1"></label>
+          <label class="f"><span>Заплатка ↑</span><input type="number" id="lpadt" step="1"></label>
+          <label class="f"><span>Заплатка ↓</span><input type="number" id="lpadb" step="1"></label>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <div class="savebar">
+    <button class="btn big go" id="saveBtn" disabled>Сохранить картинку</button>
+    <select id="scaleSel" title="Масштаб экспорта">
+      <option value="1">×1</option><option value="2" selected>×2</option><option value="3">×3</option>
+    </select>
+  </div>
+  <span id="dims"></span>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const view = $('view'), ctx = view.getContext('2d');
+  const wrap = $('wrap'), marq = $('marq');
+  const loupe = $('loupe'), loupeC = $('loupeC').getContext('2d'), loupeHex = $('loupeHex');
+  let img = null, sample = null;
+  let zoom = 1, ox = 0, oy = 0, dpr = 1;
+  let showBoxes = true, compare = false, pickMode = null, marqMode = false;
+  let sel = 0, drag = null, layers = [];
+  const pts = new Map();
+  const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+
+  function toast(msg){
+    const t = $('toast'); t.textContent = msg; t.classList.add('show');
+    clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('show'), 2200);
+  }
+
+  /* ─── пресеты: seed-точки, дальше уточняются по пикселям ─── */
+  const PRESETS = [
+    { name:'Шапка — номер', tpl:'#{n}', ref:'#6314', nx:.380, ny:.0674, nsize:.0463,
+      align:'center', weight:'700', color:'#ffffff', fill:'#17603e', winX:1.9 },
+    { name:'Заголовок — номер', tpl:'#{n}', ref:'#6314', nx:.313, ny:.1464, nsize:.0574,
+      align:'center', weight:'800', color:'#161616', fill:'#ffffff', winX:1.9 },
+    { name:'Заголовок — статус', tpl:'готов', ref:'получен', nx:.409, ny:.1455, nsize:.0574,
+      align:'left', weight:'800', color:'#161616', fill:'#ffffff' },
+    { name:'Круг — номер', tpl:'{n}', ref:'6314', nx:.7824, ny:.2289, nsize:.0806,
+      align:'center', weight:'700', color:'#ffffff', fill:'#f2761b', winX:1.25 },
+    { name:'Статус', tpl:'Готов', ref:'Получен', nx:.1481, ny:.5194, nsize:.0426,
+      align:'left', weight:'400', color:'#1c1c1c', fill:'#ffffff' },
+    { name:'Дата и время', tpl:'{дата}, {время}', ref:'02 сент. 2023, 13:03',
+      nx:.1481, ny:.5868, nsize:.0426,
+      align:'left', weight:'400', color:'#1c1c1c', fill:'#ffffff', fitBlock:true },
+    { name:'Состав заказа — скрыть', tpl:'', ref:null, noFit:true,
+      nx:.05, ny:.92832, nsize:.04, align:'left', weight:'400',
+      color:'#1c1c1c', fill:'#ffffff',
+      ncover:{ x:0, y:.81174, w:1, h:.12997 } },
+    { name:'Адрес', tpl:'Г.Санкт-Петербург',
+      ref:'Москва, ул. Красного Маяка, д. 2Б, ТЦ', nx:.1481, ny:.6455, nsize:.0417,
+      align:'left', weight:'400', color:'#1c1c1c', fill:'#ffffff',
+      nwrap:.786, lh:1.06, minl:2, fitBlock:true }
+  ];
+  const BASE = { track:0, scale:100, fam:'Roboto, system-ui, sans-serif', on:true, winX:1.9,
+                 lh:1.30, minl:1, nwrap:0, padl:0, padr:0, padt:0, padb:0, cover:null, fitBlock:false };
+
+  function build(){
+    const W = img.naturalWidth, H = img.naturalHeight;
+    layers = PRESETS.map(p => { const L = { ...BASE, ...p };
+      return { ...L, x:L.nx*W, y:L.ny*H, size:Math.round(L.nsize*W), wrap:Math.round(L.nwrap*W),
+        cover: L.ncover ? { x:L.ncover.x*W, y:L.ncover.y*H, w:L.ncover.w*W, h:L.ncover.h*H } : null };
+    });
+  }
+
+  /* сокращения месяцев — как в русской локали Android, оттуда формат «02 сент. 2023» */
+  const MON = ['янв.','февр.','мар.','апр.','мая','июн.','июл.','авг.','сент.','окт.','нояб.','дек.'];
+  const p2 = v => String(v).padStart(2, '0');
+  function stamp(){
+    const d = new Date();
+    return { date:`${p2(d.getDate())} ${MON[d.getMonth()]} ${d.getFullYear()}`,
+             time:`${p2(d.getHours())}:${p2(d.getMinutes())}` };
+  }
+  const textOf = L => {
+    const s = stamp();
+    return (L.tpl || '')
+      .replace(/\{n\}/g, $('num').value)
+      .replace(/\{дата\}|\{date\}/gi, s.date)
+      .replace(/\{время\}|\{time\}/gi, s.time);
+  };
+  /* пока на экране есть слой со временем, держим минуты актуальными */
+  setInterval(() => {
+    if (img && layers.some(L => L.on && /\{время\}|\{time\}/i.test(L.tpl || ''))) render();
+  }, 15000);
+  const setFont = (c, L, size) => {
+    c.font = `${L.weight} ${size || L.size}px ${L.fam}`;
+    c.letterSpacing = L.track + 'px';
+  };
+  function mline(c, L, str, size){
+    setFont(c, L, size);
+    const m = c.measureText(str || 'X'), k = L.scale / 100;
+    return { adv:m.width * k,
+      asc:m.actualBoundingBoxAscent || (size || L.size) * .72,
+      desc:m.actualBoundingBoxDescent || 0,
+      abl:(m.actualBoundingBoxLeft || 0) * k };
+  }
+  function linesOf(c, L){
+    const raw = textOf(L).split('\n');
+    if (!L.wrap) return raw;
+    const out = [];
+    for (const r of raw){
+      let cur = '';
+      for (const w of r.split(' ')){
+        const t = cur ? cur + ' ' + w : w;
+        if (cur && mline(c, L, t).adv > L.wrap){ out.push(cur); cur = w; } else cur = t;
+      }
+      out.push(cur);
+    }
+    return out;
+  }
+
+  /* геометрия: L.y — базовая линия первой строки */
+  function layout(c, L){
+    const lines = linesOf(c, L), lhpx = L.size * L.lh;
+    const first = mline(c, L, lines[0]);
+    const last  = mline(c, L, lines[lines.length - 1]);
+    let w = 0;
+    const put = lines.map((ln, i) => {
+      const m = mline(c, L, ln); w = Math.max(w, m.adv);
+      return { ln, adv:m.adv, base:L.y + i * lhpx };
+    });
+    put.forEach(p => {
+      p.left = L.align === 'left' ? L.x : L.align === 'right' ? L.x - p.adv : L.x - p.adv / 2;
+    });
+    const left = L.align === 'left' ? L.x : L.align === 'right' ? L.x - w : L.x - w / 2;
+    const rows = Math.max(lines.length, L.minl || 1);
+    let r = { x:left - L.padl, y:L.y - first.asc - L.padt,
+              w:w + L.padl + L.padr,
+              h:first.asc + (rows - 1) * lhpx + last.desc + L.padt + L.padb };
+    if (L.cover){
+      const x0 = Math.min(r.x, L.cover.x), y0 = Math.min(r.y, L.cover.y);
+      const x1 = Math.max(r.x + r.w, L.cover.x + L.cover.w);
+      const y1 = Math.max(r.y + r.h, L.cover.y + L.cover.h);
+      r = { x:x0, y:y0, w:x1 - x0, h:y1 - y0 };
+    }
+    return { put, rect:r, lhpx };
+  }
+
+  function paint(c, withBoxes){
+    c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+    c.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight);
+    if (compare) return;
+    for (const L of layers){
+      if (!L.on) continue;
+      const has = textOf(L).trim().length > 0;
+      if (!has && !L.cover) continue;
+      const g = layout(c, L);
+      c.fillStyle = L.fill;
+      c.fillRect(Math.round(g.rect.x), Math.round(g.rect.y), Math.round(g.rect.w), Math.round(g.rect.h));
+      if (has){
+        setFont(c, L); c.textAlign = 'left'; c.textBaseline = 'alphabetic'; c.fillStyle = L.color;
+        for (const p of g.put){
+          c.save(); c.translate(p.left, p.base); c.scale(L.scale / 100, 1);
+          c.fillText(p.ln, 0, 0); c.restore();
+        }
+      }
+      if (withBoxes){
+        const on = layers[sel] === L;
+        c.lineWidth = Math.max(1, 1.5 / zoom);
+        c.strokeStyle = on ? '#f2761b' : 'rgba(255,255,255,.35)';
+        c.setLineDash(on ? [] : [6,5]);
+        c.strokeRect(g.rect.x, g.rect.y, g.rect.w, g.rect.h);
+        c.setLineDash([]);
+      }
+    }
+  }
+
+  /* ─── автоподгонка по пикселям ─── */
+  const runsOf = (arr, minc, gap) => {
+    const out = []; let st = -1, last = -1;
+    for (let i = 0; i < arr.length; i++){
+      if (arr[i] >= minc){ if (st < 0) st = i; last = i; }
+      else if (st >= 0 && i - last > gap){ out.push([st, last]); st = -1; }
+    }
+    if (st >= 0) out.push([st, last]);
+    return out;
+  };
+
+  /* форма эталонной строки: меряем её тем же правилом, что и пиксели скриншота,
+     поэтому кегль и базовая линия переносятся без систематической ошибки */
+  const shapeCache = new Map();
+  function refShape(L, ref){
+    const key = [ref, L.weight, L.fam, L.track].join('|');
+    if (shapeCache.has(key)) return shapeCache.get(key);
+    const S = 100, pen = 60, base = 200;
+    const c = document.createElement('canvas');
+    const g0 = c.getContext('2d');
+    setFont(g0, L, S);
+    c.width = Math.ceil(g0.measureText(ref).width) + 140; c.height = 340;
+    const g = c.getContext('2d', { willReadFrequently:true });
+    g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+    setFont(g, L, S); g.textAlign = 'left'; g.textBaseline = 'alphabetic'; g.fillStyle = '#000';
+    g.fillText(ref, pen, base);
+    const d = g.getImageData(0, 0, c.width, c.height).data;
+    const rc = new Int32Array(c.height); let colFirst = c.width;
+    for (let y = 0; y < c.height; y++) for (let x = 0; x < c.width; x++){
+      const i = (y * c.width + x) * 4;
+      if (765 - d[i] - d[i+1] - d[i+2] > 52){ rc[y]++; if (x < colFirst) colFirst = x; }
+    }
+    let mx = 0; for (const v of rc) mx = Math.max(mx, v);
+    const thr = Math.max(2, Math.round(mx * .10));
+    let top = -1, bot = -1;
+    for (let y = 0; y < c.height; y++) if (rc[y] >= thr){ if (top < 0) top = y; bot = y; }
+    // полный размах чернил, без порога: сюда попадают выносные элементы (у, д, р, ц, запятая)
+    let ftop = -1, fbot = -1;
+    for (let y = 0; y < c.height; y++) if (rc[y] > 0){ if (ftop < 0) ftop = y; fbot = y; }
+    const r = top < 0 ? { hR:.72, descR:0, leftR:0, ascFull:.75, descFull:.22 }
+      : { hR:(bot + 1 - top) / S, descR:(bot + 1 - base) / S, leftR:(colFirst - pen) / S,
+          ascFull:(base - ftop) / S, descFull:(fbot + 1 - base) / S };
+    shapeCache.set(key, r);
+    return r;
+  }
+
+  /* rect — необязательная область (когда пользователь обвёл её сам) */
+  function detect(L, rect){
+    if (!sample) return false;
+    const W = img.naturalWidth, H = img.naturalHeight;
+    const s = L.size, rows = Math.max(L.minl || 1, 1), wx = L.winX || 1.9;
+    let x0, x1, y0, y1;
+    if (rect){
+      x0 = Math.round(rect.x); x1 = Math.round(rect.x + rect.w);
+      y0 = Math.round(rect.y); y1 = Math.round(rect.y + rect.h);
+    } else {
+      y0 = Math.floor(L.y - s * 1.35);
+      y1 = Math.ceil(L.y + s * .62 + (rows - 1) * s * L.lh);
+      if (L.align === 'left'){ x0 = Math.floor(L.x - s * .7); x1 = Math.ceil(L.x + (L.fitBlock ? W * .9 : s * 8)); }
+      else { x0 = Math.floor(L.x - s * wx); x1 = Math.ceil(L.x + s * wx); }
+    }
+    x0 = clamp(x0, 0, W - 2); x1 = clamp(x1, x0 + 6, W);
+    y0 = clamp(y0, 0, H - 2); y1 = clamp(y1, y0 + 6, H);
+    const w = x1 - x0, h = y1 - y0;
+    const d = sample.getImageData(x0, y0, w, h).data;
+
+    // фон — мода по рамке окна
+    const cnt = new Map(), sum = new Map();
+    const key = i => (d[i] >> 3 << 10) | (d[i+1] >> 3 << 5) | (d[i+2] >> 3);
+    const add = i => {
+      const k = key(i);
+      cnt.set(k, (cnt.get(k) || 0) + 1);
+      const a = sum.get(k) || [0,0,0];
+      a[0] += d[i]; a[1] += d[i+1]; a[2] += d[i+2];
+      sum.set(k, a);
+    };
+    for (let x = 0; x < w; x++){ add(x * 4); add(((h-1) * w + x) * 4); }
+    for (let y = 0; y < h; y++){ add(y * w * 4); add((y * w + w - 1) * 4); }
+    let bn = -1, bk = 0; cnt.forEach((v, k) => { if (v > bn){ bn = v; bk = k; } });
+    // среднее по пикселям корзины, а не её центр: округление до 5 бит давало ошибку
+    // до 4 единиц на канал, и заплатка выходила заметно темнее фона
+    const bsum = sum.get(bk), bcnt = cnt.get(bk);
+    const bg = [Math.round(bsum[0]/bcnt), Math.round(bsum[1]/bcnt), Math.round(bsum[2]/bcnt)];
+
+    const mask = new Uint8Array(w * h), rc = new Int32Array(h);
+    let maxD = 0;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++){
+      const i = (y * w + x) * 4;
+      const dist = Math.abs(d[i]-bg[0]) + Math.abs(d[i+1]-bg[1]) + Math.abs(d[i+2]-bg[2]);
+      if (dist > 52){ mask[y*w+x] = 1; rc[y]++; if (dist > maxD) maxD = dist; }
+    }
+    let mxr = 0; for (const v of rc) mxr = Math.max(mxr, v);
+    if (!mxr) return false;
+    const rr = runsOf(rc, Math.max(2, Math.round(mxr * .10)), 2);
+    if (!rr.length) return false;
+
+    const ay = L.y - y0 - s * .35;
+    const near = [...rr].sort((a,b) => Math.abs((a[0]+a[1])/2 - ay) - Math.abs((b[0]+b[1])/2 - ay));
+    const groups = (L.fitBlock || rect) ? near.slice(0, rect ? rr.length : rows).sort((a,b) => a[0]-b[0])
+                                        : [near[0]];
+    const R0 = groups[0], RL = groups[groups.length - 1];
+
+    const cc = new Int32Array(w);
+    for (let y = R0[0]; y <= RL[1]; y++) for (let x = 0; x < w; x++) if (mask[y*w+x]) cc[x]++;
+    const cr = runsOf(cc, 1, Math.max(2, Math.round(s * .24)));
+    if (!cr.length) return false;
+    let span;
+    if (L.fitBlock || rect) span = [cr[0][0], cr[cr.length-1][1]];
+    else if (L.align === 'left'){
+      const ax = L.x - x0;
+      span = cr.find(r => r[0] >= ax - s * .5) ||
+             cr.reduce((a,b) => Math.abs(b[0]-ax) < Math.abs(a[0]-ax) ? b : a);
+    } else {
+      const ax = L.x - x0;
+      span = cr.find(r => ax >= r[0] - s*.4 && ax <= r[1] + s*.4) ||
+             cr.reduce((a,b) => Math.abs((b[0]+b[1])/2-ax) < Math.abs((a[0]+a[1])/2-ax) ? b : a);
+    }
+
+    // высота — только по выбранным колонкам внутри первой строки
+    const sc = new Int32Array(R0[1] - R0[0] + 1);
+    for (let y = R0[0]; y <= RL[1] && y <= R0[1]; y++)
+      for (let x = span[0]; x <= span[1]; x++) if (mask[y*w+x]) sc[y - R0[0]]++;
+    let mxs = 0; for (const v of sc) mxs = Math.max(mxs, v);
+    if (!mxs) return false;
+    const t2 = Math.max(2, Math.round(mxs * .10));
+    let ry0 = -1, ry1 = -1;
+    for (let i = 0; i < sc.length; i++) if (sc[i] >= t2){ if (ry0 < 0) ry0 = i; ry1 = i; }
+    if (ry0 < 0) return false;
+
+    const bx0 = x0 + span[0], bx1 = x0 + span[1] + 1;
+    const by0 = y0 + R0[0] + ry0, by1 = y0 + R0[0] + ry1 + 1;
+    const blockY1 = y0 + RL[1] + 1;
+    const inkH = by1 - by0;
+    if (!rect && (inkH < s * .30 || inkH > s * 1.60)) return false;   // явный промах — не трогаем слой
+
+    // цвет текста: ядро маски
+    let R = 0, G = 0, B = 0, n = 0;
+    for (let y = R0[0] + ry0; y <= R0[0] + ry1; y++) for (let x = span[0]; x <= span[1]; x++){
+      if (!mask[y*w+x]) continue;
+      const i = (y*w+x)*4;
+      const dist = Math.abs(d[i]-bg[0]) + Math.abs(d[i+1]-bg[1]) + Math.abs(d[i+2]-bg[2]);
+      if (dist > maxD * .78){ R += d[i]; G += d[i+1]; B += d[i+2]; n++; }
+    }
+    const h2 = v => Math.round(v).toString(16).padStart(2,'0');
+
+    const ref = L.ref || textOf(L) || '0';
+    const sh = refShape(L, ref);
+    const newSize = clamp(Math.round(inkH / (sh.hR || .72)), 6, 400);
+    L.size = newSize;
+    L.y = Math.round(by1 - sh.descR * newSize);
+    L.fill = '#' + h2(bg[0]) + h2(bg[1]) + h2(bg[2]);
+    if (n) L.color = '#' + h2(R/n) + h2(G/n) + h2(B/n);
+    if (L.align === 'left') L.x = Math.round(bx0 - sh.leftR * newSize * (L.scale/100));
+    else if (L.align === 'center') L.x = Math.round((bx0 + bx1) / 2);
+    else L.x = Math.round(bx1);
+    const pad = Math.max(2, Math.round(newSize * .02));
+    // порог в 10% отбрасывает редкие строки пикселей — хвосты у, д, р, ц и верхушки прописных.
+    // разницу берём с эталона: иначе низ заплатки встаёт по базовой линии и хвост торчит наружу
+    const ascR   = (sh.hR || .72) - (sh.descR || 0);
+    const aExtra = Math.max(0, Math.round(((sh.ascFull  != null ? sh.ascFull  : ascR)        - ascR)          * newSize));
+    const dExtra = Math.max(0, Math.round(((sh.descFull != null ? sh.descFull : sh.descR||0) - (sh.descR||0)) * newSize));
+    // порог 10% теряет редкие строки и столбцы: хвосты у/д/р и сглаженные края глифов.
+    // дорастаем область по самим пикселям, пока соседняя строка (столбец) не станет чистым фоном —
+    // рост обрывается на первом же чистом ряду, поэтому в соседние элементы не заезжает
+    // рост ограничен тем, насколько эталонная строка реально выходит за порог:
+    // у цифр выносных элементов нет, поэтому вниз они не растут совсем и графика
+    // под ними (трубочка стакана в круге) остаётся нетронутой
+    const lowT = 20;
+    const growUp   = aExtra > 0 ? aExtra + pad : 0;
+    const growDown = dExtra > 0 ? dExtra + pad : 0;
+    const growSide = Math.ceil(newSize * .08);
+    let eL = span[0], eR = span[1], eTop = R0[0] + ry0, eBot = RL[1];
+    const inkAt = (x, y) => { const i = (y*w + x) * 4;
+      return Math.abs(d[i]-bg[0]) + Math.abs(d[i+1]-bg[1]) + Math.abs(d[i+2]-bg[2]) > lowT; };
+    const rowInk = y => { for (let x = eL; x <= eR; x++) if (inkAt(x, y)) return true; return false; };
+    const colInk = x => { for (let y = eTop; y <= eBot; y++) if (inkAt(x, y)) return true; return false; };
+    for (let k = 0; k < growUp   && eTop > 0     && rowInk(eTop - 1); k++) eTop--;
+    for (let k = 0; k < growDown && eBot < h - 1 && rowInk(eBot + 1); k++) eBot++;
+    for (let k = 0; k < growSide && eL   > 0     && colInk(eL   - 1); k++) eL--;
+    for (let k = 0; k < growSide && eR   < w - 1 && colInk(eR   + 1); k++) eR++;
+    const cx0 = Math.min(bx0, x0 + eL),          cy0 = Math.min(by0 - aExtra, y0 + eTop);
+    const cx1 = Math.max(bx1, x0 + eR + 1),      cy1 = Math.max(blockY1 + dExtra, y0 + eBot + 1);
+    L.cover = { x:cx0 - pad, y:cy0 - pad, w:(cx1 - cx0) + pad*2, h:(cy1 - cy0) + pad*2 };
+    if (L.fitBlock){
+      // перенос нужен только многострочным блокам (адрес); однострочной дате он мешает
+      if ((L.minl || 1) > 1) L.wrap = Math.round((bx1 - bx0) + newSize * .3);
+      if (groups.length > 1){
+        const c1 = (groups[0][0] + groups[0][1]) / 2, c2 = (groups[1][0] + groups[1][1]) / 2;
+        L.lh = +((c2 - c1) / newSize).toFixed(3);
+      }
+    }
+    return true;
+  }
+
+  function fitAll(){
+    if (!img) return;
+    let ok = 0;
+    layers.forEach(L => { if (L.on && !L.noFit && detect(L)) ok++; });
+    drawLayers(); loadInspector(); render();
+    toast(`Подогнано слоёв: ${ok} из ${layers.length}`);
+  }
+
+  /* ─── вид ─── */
+  function render(){
+    if (!img) return;
+    dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    const cw = img.naturalWidth * zoom, ch = img.naturalHeight * zoom;
+    view.style.width = cw + 'px'; view.style.height = ch + 'px';
+    view.style.marginLeft = ox + 'px'; view.style.marginTop = oy + 'px';
+    view.width = Math.max(1, Math.round(cw * dpr)); view.height = Math.max(1, Math.round(ch * dpr));
+    ctx.setTransform(zoom * dpr, 0, 0, zoom * dpr, 0, 0);
+    paint(ctx, showBoxes);
+  }
+  function fit(){
+    const r = wrap.getBoundingClientRect();
+    zoom = Math.min((r.width - 32) / img.naturalWidth, (r.height - 32) / img.naturalHeight);
+    ox = oy = 0; render();
+  }
+
+  function useImage(src, revoke, fallback){
+    const im = new Image();
+    im.onload = () => {
+      if (revoke) setTimeout(() => URL.revokeObjectURL(src), 1000);
+      img = im;
+      const off = document.createElement('canvas');
+      off.width = im.naturalWidth; off.height = im.naturalHeight;
+      sample = off.getContext('2d', { willReadFrequently:true });
+      sample.drawImage(im, 0, 0);
+      build(); sel = 0;
+      $('empty').style.display = 'none'; $('saveBtn').disabled = false;
+      $('dims').textContent = `${im.naturalWidth}×${im.naturalHeight}`;
+      requestAnimationFrame(() => { fit(); fitAll(); });
+    };
+    im.onerror = () => {
+      if (revoke) URL.revokeObjectURL(src);
+      if (fallback) fallback();
+      else toast('Файл не открылся. Нужен снимок экрана PNG или JPEG — HEIC не читается');
+    };
+    im.src = src;
+  }
+  function load(file){
+    if (!file){ toast('Файл не выбран'); return; }
+    toast('Читаю файл…');
+    const viaReader = () => {
+      const fr = new FileReader();
+      fr.onload = () => useImage(fr.result, false, null);
+      fr.onerror = () => toast('Файл не читается');
+      fr.readAsDataURL(file);
+    };
+    let url = null;
+    try { url = URL.createObjectURL(file); } catch(e){}
+    if (url) useImage(url, true, viaReader); else viaReader();
+  }
+  $('file').addEventListener('change', e => {
+    const f = e.target.files && e.target.files[0];
+    load(f);
+    e.target.value = '';          // иначе повторный выбор того же файла не даёт события
+  });
+  ['dragover','drop'].forEach(t => wrap.addEventListener(t, e => e.preventDefault()));
+  wrap.addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if (f) load(f); });
+
+  /* ─── список слоёв ─── */
+  function drawLayers(){
+    const host = $('layers'); host.innerHTML = '';
+    layers.forEach((L, i) => {
+      const row = document.createElement('div');
+      row.className = 'layer'; row.setAttribute('role','option');
+      row.setAttribute('aria-selected', i === sel);
+      row.innerHTML = `<span class="idx">${String(i+1).padStart(2,'0')}</span><span class="nm"></span>
+        <span class="sw" style="background:${L.fill}"></span>`;
+      row.querySelector('.nm').textContent = L.name;
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.checked = L.on;
+      cb.onclick = e => { e.stopPropagation(); L.on = cb.checked; render(); };
+      row.appendChild(cb);
+      row.onclick = () => { sel = i; drawLayers(); loadInspector(); render(); };
+      host.appendChild(row);
+    });
+  }
+
+  const F = { tpl:'tpl', x:'lx', y:'ly', size:'lsize', align:'lalign', wrap:'lwrap', lh:'llh', minl:'lminl',
+              fam:'lfam', weight:'lweight', track:'ltrack', scale:'lscale', color:'lcolor', fill:'lfill',
+              padl:'lpadl', padr:'lpadr', padt:'lpadt', padb:'lpadb' };
+  const NUMK = ['x','y','size','track','scale','padl','padr','padt','padb','wrap','lh','minl'];
+  function loadInspector(){
+    const L = layers[sel]; if (!L) return;
+    for (const k in F) $(F[k]).value = NUMK.includes(k) ? Math.round(L[k] * 1000) / 1000 : L[k];
+    $('editor').hidden = false;
+    $('edTitle').textContent = L.name;
+    $('vSize').textContent = Math.round(L.size);
+    $('vPadb').textContent = Math.round(L.padb);
+    $('vPadr').textContent = Math.round(L.padr);
+    $('posLbl').textContent = Math.round(L.x) + ', ' + Math.round(L.y);
+  }
+  for (const k in F){
+    $(F[k]).addEventListener('input', e => {
+      const L = layers[sel]; if (!L) return;
+      L[k] = NUMK.includes(k) ? (parseFloat(e.target.value) || 0) : e.target.value;
+      if (k === 'fill') drawLayers();
+      render();
+    });
+  }
+  $('num').addEventListener('input', render);
+
+  $('addBtn').onclick = () => {
+    if (!img) return;
+    const W = img.naturalWidth;
+    layers.push({ ...BASE, name:'Новый слой', tpl:'текст', ref:null, align:'left',
+      x:W * .12, y:img.naturalHeight * .5, size:Math.round(W * .042), weight:'400',
+      color:'#161616', fill:'#ffffff' });
+    sel = layers.length - 1; drawLayers(); loadInspector(); render();
+  };
+  $('delBtn').onclick = () => {
+    if (layers.length < 2) return;
+    layers.splice(sel, 1); sel = Math.max(0, sel - 1);
+    drawLayers(); loadInspector(); render();
+  };
+  $('clrCoverBtn').onclick = () => { const L = layers[sel]; if (L){ L.cover = null; render(); } };
+  $('boxBtn').onclick = e => { showBoxes = !showBoxes; e.currentTarget.classList.toggle('on', showBoxes); render(); };
+  $('resetBtn').onclick = () => { if (img){ build(); sel = 0; fitAll(); } };
+  $('fitBtn').onclick = () => img && fit();
+  $('fitAllBtn').onclick = fitAll;
+  $('fitSelBtn').onclick = () => {
+    if (!img) return;
+    if (layers[sel] && layers[sel].noFit){ toast('Это слой-заливка, подгонять нечего'); return; }
+    toast(detect(layers[sel]) ? 'Слой подогнан' : 'Текст рядом не найден');
+    drawLayers(); loadInspector(); render();
+  };
+
+  const cmp = on => { compare = on; $('cmpBtn').classList.toggle('on', on); render(); };
+  ['pointerdown'].forEach(t => $('cmpBtn').addEventListener(t, () => cmp(true)));
+  ['pointerup','pointerleave','pointercancel'].forEach(t => $('cmpBtn').addEventListener(t, () => cmp(false)));
+
+  function setPick(mode){
+    pickMode = mode;
+    if (mode) marqMode = false;
+    $('eyeBtn').classList.toggle('on', !!mode);
+    $('marqBtn').classList.toggle('on', marqMode);
+    wrap.classList.toggle('picking', !!mode);
+    wrap.classList.toggle('marquee', marqMode);
+    document.querySelectorAll('[data-pick]').forEach(b => b.classList.toggle('on', b.dataset.pick === mode));
+    if (!mode) loupe.style.display = 'none';
+  }
+  $('eyeBtn').onclick = () => setPick(pickMode ? null : 'fill');
+  $('marqBtn').onclick = () => { marqMode = !marqMode; pickMode = null; setPick(null); };
+  document.querySelectorAll('[data-pick]').forEach(b =>
+    b.onclick = () => setPick(pickMode === b.dataset.pick ? null : b.dataset.pick));
+
+  const hex = (r,g,b) => '#' + [r,g,b].map(v => v.toString(16).padStart(2,'0')).join('');
+  function imgPos(e){
+    const r = view.getBoundingClientRect();
+    return { x:(e.clientX - r.left) / zoom, y:(e.clientY - r.top) / zoom };
+  }
+  const pixAt = p => {
+    const d = sample.getImageData(clamp(p.x|0, 0, img.naturalWidth-1), clamp(p.y|0, 0, img.naturalHeight-1), 1, 1).data;
+    return hex(d[0], d[1], d[2]);
+  };
+
+  /* ─── указатель: мышь + тач + пинч ─── */
+  wrap.addEventListener('pointerdown', e => {
+    if (!img) return;
+    wrap.setPointerCapture(e.pointerId);
+    pts.set(e.pointerId, { x:e.clientX, y:e.clientY });
+    if (pts.size === 2){
+      const [a, b] = [...pts.values()];
+      drag = { kind:'pinch', d:Math.hypot(a.x-b.x, a.y-b.y), z:zoom, ox, oy,
+               mx:(a.x+b.x)/2, my:(a.y+b.y)/2 };
+      return;
+    }
+    if (pickMode){ showLoupe(e); return; }
+    if (marqMode){
+      const r = wrap.getBoundingClientRect();
+      drag = { kind:'marq', sx:e.clientX - r.left, sy:e.clientY - r.top };
+      marq.style.display = 'block';
+      marq.style.left = drag.sx + 'px'; marq.style.top = drag.sy + 'px';
+      marq.style.width = marq.style.height = '0px';
+      return;
+    }
+    const p = imgPos(e), probe = document.createElement('canvas').getContext('2d');
+    for (let i = layers.length - 1; i >= 0; i--){
+      const L = layers[i]; if (!L.on) continue;
+      const r = layout(probe, L).rect;
+      if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h){
+        sel = i; drawLayers(); loadInspector();
+        drag = { kind:'layer', px:p.x, py:p.y, lx:L.x, ly:L.y,
+                 cov:L.cover ? { ...L.cover } : null };
+        wrap.classList.add('dragging'); render(); return;
+      }
+    }
+    drag = { kind:'pan', cx:e.clientX, cy:e.clientY, ox, oy };
+    wrap.classList.add('dragging');
+  });
+
+  function showLoupe(e){
+    const p = imgPos(e), N = 11, half = (N-1)/2, wr = wrap.getBoundingClientRect(), k = zoom * dpr;
+    loupe.style.display = 'block';
+    loupe.style.left = (e.clientX - wr.left - 64) + 'px';
+    loupe.style.top  = (e.clientY - wr.top - 156) + 'px';
+    loupeC.imageSmoothingEnabled = false;
+    loupeC.clearRect(0, 0, 128, 128);
+    loupeC.drawImage(view, (p.x - half) * k, (p.y - half) * k, N * k, N * k, 0, 0, 128, 128);
+    loupeHex.textContent = pixAt(p).toUpperCase();
+  }
+
+  wrap.addEventListener('pointermove', e => {
+    if (!img) return;
+    if (pts.has(e.pointerId)) pts.set(e.pointerId, { x:e.clientX, y:e.clientY });
+    if (pickMode && pts.size <= 1) showLoupe(e);
+    if (!drag) return;
+    if (drag.kind === 'pinch' && pts.size === 2){
+      const [a, b] = [...pts.values()];
+      const nd = Math.hypot(a.x-b.x, a.y-b.y);
+      zoom = clamp(drag.z * (nd / drag.d), .05, 8);
+      render(); return;
+    }
+    if (drag.kind === 'layer'){
+      const p = imgPos(e), L = layers[sel];
+      const dx = p.x - drag.px, dy = p.y - drag.py;
+      L.x = drag.lx + dx; L.y = drag.ly + dy;
+      if (drag.cov) L.cover = { ...drag.cov, x:drag.cov.x + dx, y:drag.cov.y + dy };
+      loadInspector(); render();
+    } else if (drag.kind === 'pan'){
+      ox = drag.ox + (e.clientX - drag.cx); oy = drag.oy + (e.clientY - drag.cy); render();
+    } else if (drag.kind === 'marq'){
+      const r = wrap.getBoundingClientRect();
+      const x = e.clientX - r.left, y = e.clientY - r.top;
+      marq.style.left = Math.min(x, drag.sx) + 'px'; marq.style.top = Math.min(y, drag.sy) + 'px';
+      marq.style.width = Math.abs(x - drag.sx) + 'px'; marq.style.height = Math.abs(y - drag.sy) + 'px';
+    }
+  });
+
+  function endPointer(e){
+    pts.delete(e.pointerId);
+    if (!drag){ return; }
+    if (drag.kind === 'marq'){
+      const r = wrap.getBoundingClientRect(), vr = view.getBoundingClientRect();
+      const box = marq.getBoundingClientRect();
+      marq.style.display = 'none';
+      const x0 = (box.left - vr.left) / zoom, y0 = (box.top - vr.top) / zoom;
+      const w = box.width / zoom, h = box.height / zoom;
+      if (w > 6 && h > 6) makeLayerFromRect(x0, y0, w, h);
+    }
+    if (drag.kind === 'pinch' && pts.size < 2) { /* выходим из пинча */ }
+    if (pickMode && drag.kind !== 'marq' && drag.kind !== 'pinch'){ /* обработано в up ниже */ }
+    drag = null; wrap.classList.remove('dragging');
+  }
+  wrap.addEventListener('pointerup', e => {
+    if (img && pickMode){
+      const p = imgPos(e), c = pixAt(p), L = layers[sel];
+      L[pickMode] = c; $(pickMode === 'fill' ? 'lfill' : 'lcolor').value = c;
+      setPick(null); drawLayers(); render();
+    }
+    endPointer(e);
+  });
+  wrap.addEventListener('pointercancel', endPointer);
+  wrap.addEventListener('pointerleave', e => { if (pickMode) loupe.style.display = 'none'; });
+
+  function makeLayerFromRect(x, y, w, h){
+    const L = { ...BASE, name:'Обведённый', tpl:'', ref:null, align:'left',
+      x:x, y:y + h * .78, size:Math.max(6, Math.round(h * .8)), weight:'400',
+      color:'#161616', fill:'#ffffff', cover:{ x, y, w, h } };
+    layers.push(L); sel = layers.length - 1;
+    detect(L, { x, y, w, h });
+    L.cover = { x, y, w, h };          // рамка пользователя главнее найденной
+    L.tpl = '';
+    marqMode = false; setPick(null);
+    drawLayers(); loadInspector(); render();
+    toast('Слой создан — впиши текст во вкладке «Текст»');
+  }
+
+  wrap.addEventListener('wheel', e => {
+    if (!img) return;
+    e.preventDefault();
+    zoom = clamp(zoom * (e.deltaY < 0 ? 1.12 : .89), .05, 8);
+    render();
+  }, { passive:false });
+
+  addEventListener('keydown', e => {
+    if (!img || /input|select|textarea/i.test(e.target.tagName)) return;
+    if (e.key.toLowerCase() === 'i'){ setPick(pickMode ? null : 'fill'); return; }
+    const step = e.shiftKey ? 10 : 1, L = layers[sel];
+    const map = { ArrowLeft:[-step,0], ArrowRight:[step,0], ArrowUp:[0,-step], ArrowDown:[0,step] };
+    if (map[e.key]){
+      e.preventDefault();
+      L.x += map[e.key][0]; L.y += map[e.key][1];
+      if (L.cover){ L.cover.x += map[e.key][0]; L.cover.y += map[e.key][1]; }
+      loadInspector(); render();
+    }
+  });
+
+  /* ─── экспорт ─── */
+  $('saveBtn').onclick = () => {
+    const k = parseFloat($('scaleSel').value) || 1;
+    const out = document.createElement('canvas');
+    out.width = Math.round(img.naturalWidth * k);
+    out.height = Math.round(img.naturalHeight * k);
+    const oc = out.getContext('2d');
+    oc.setTransform(k, 0, 0, k, 0, 0);
+    const was = compare; compare = false;
+    paint(oc, false); compare = was;
+    const safe = String($('num').value || 'edit').replace(/[^\wА-Яа-яЁё-]+/g, '_').slice(0, 40);
+    const name = `zakaz-${safe || 'edit'}${k > 1 ? '@' + k + 'x' : ''}.png`;
+    out.toBlob(b => {
+      if (!b){ toast('Не удалось собрать картинку'); return; }
+      try {
+        const f = new File([b], name, { type:'image/png' });
+        if (navigator.canShare && navigator.canShare({ files:[f] })){
+          navigator.share({ files:[f] }).catch(() => {});   // iOS: Поделиться → Сохранить в Фото
+          return;
+        }
+      } catch(err){}
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(b);
+      a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    }, 'image/png');
+  };
+
+  /* ─── крупные органы управления для телефона ─── */
+  let nudgeStep = 1;
+  $('stepBtn').onclick = () => {
+    nudgeStep = nudgeStep === 1 ? 5 : nudgeStep === 5 ? 10 : 1;
+    $('stepBtn').textContent = 'шаг ' + nudgeStep + ' px';
+  };
+  document.querySelectorAll('[data-nudge]').forEach(b => b.onclick = () => {
+    const L = layers[sel]; if (!L) return;
+    const [dx, dy] = b.dataset.nudge.split(',').map(Number);
+    L.x += dx * nudgeStep; L.y += dy * nudgeStep;
+    if (L.cover){ L.cover.x += dx * nudgeStep; L.cover.y += dy * nudgeStep; }
+    loadInspector(); render();
+  });
+  document.querySelectorAll('[data-inc]').forEach(b => b.onclick = () => {
+    const L = layers[sel]; if (!L) return;
+    const parts = b.dataset.inc.split(',');
+    const key = parts[0], d = Number(parts[1]) * nudgeStep;
+    L[key] = Math.max(key === 'size' ? 4 : 0, (L[key] || 0) + d);
+    loadInspector(); render();
+  });
+
+  /* Roboto с вебшрифтом: на iOS системного Roboto нет */
+  if (document.fonts && document.fonts.load){
+    Promise.all(['400 48px Roboto','700 60px Roboto','700 132px Roboto']
+      .map(f => document.fonts.load(f))).then(() => { if (img) render(); }).catch(() => {});
+  }
+
+  addEventListener('resize', () => img && render());
+})();
+</script></body></html>
