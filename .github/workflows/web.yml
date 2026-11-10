@@ -27,7 +27,7 @@ jobs:
         run: |
           flutter create --platforms=web --org ru.kanbancrm --project-name kanban_crm .
           flutter pub get
-          flutter build web --release --base-href /yadalbaeb/kanban/
+          flutter build web --release --wasm --base-href /yadalbaeb/kanban/
 
       - uses: actions/upload-artifact@v4
         with:
