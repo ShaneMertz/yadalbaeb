@@ -98,10 +98,10 @@ class _BoardPageState extends State<BoardPage> {
       setState(() => tasks = data.map((e) => Task.fromJson(e as Map<String, dynamic>)).toList());
     } else {
       setState(() => tasks = [
-            Task(id: '1', title: 'Декларация OLMASELIK', note: 'Лена обещала до 15.11', column: 'wait', tag: 'поставщик'),
-            Task(id: '2', title: 'Оплатить счёт ФФ', column: 'todo', tag: 'оплата'),
-            Task(id: '3', title: 'Обложка B — проверить CTR', column: 'doing', tag: 'команда'),
-            Task(id: '4', title: 'Поставка WB', column: 'done'),
+            Task(id: '1', title: 'Документы от поставщика', note: 'Обещали до пятницы', column: 'wait', tag: 'поставщик'),
+            Task(id: '2', title: 'Оплатить счёт склада', column: 'todo', tag: 'оплата'),
+            Task(id: '3', title: 'Проверить новую обложку', column: 'doing', tag: 'команда'),
+            Task(id: '4', title: 'Отгрузка на маркетплейс', column: 'done'),
           ]);
       _save();
     }
