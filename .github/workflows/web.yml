@@ -1,0 +1,50 @@
+name: Web build
+
+on:
+  push:
+    branches: [kanban-app]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: kanban-web
+  cancel-in-progress: true
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build web
+        run: |
+          flutter create --platforms=web --org ru.kanbancrm --project-name kanban_crm .
+          flutter pub get
+          flutter build web --release --base-href /yadalbaeb/kanban/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KanbanCRM-web
+          path: build/web
+
+      # Публикуем в папку kanban/ ветки main (GitHub Pages сайта yadalbaeb).
+      # Остальные файлы main (index.html и т.д.) не трогаем.
+      - name: Publish to main/kanban
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git worktree add ../site origin/main
+          rm -rf ../site/kanban
+          cp -R build/web ../site/kanban
+          cd ../site
+          git add kanban
+          git commit -m "kanban web: ${GITHUB_SHA::7}" || { echo "no changes"; exit 0; }
+          git push origin HEAD:main

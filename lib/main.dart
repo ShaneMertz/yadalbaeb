@@ -1,8 +1,7 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() => runApp(const KanbanApp());
 
@@ -81,7 +80,8 @@ class BoardPage extends StatefulWidget {
 
 class _BoardPageState extends State<BoardPage> {
   List<Task> tasks = [];
-  File? _file;
+  SharedPreferences? _prefs;
+  static const _key = 'board_v1';
 
   @override
   void initState() {
@@ -90,11 +90,10 @@ class _BoardPageState extends State<BoardPage> {
   }
 
   Future<void> _load() async {
-    final dir = await getApplicationSupportDirectory();
-    await dir.create(recursive: true);
-    _file = File('${dir.path}/board.json');
-    if (await _file!.exists()) {
-      final data = jsonDecode(await _file!.readAsString()) as List;
+    _prefs = await SharedPreferences.getInstance();
+    final raw = _prefs!.getString(_key);
+    if (raw != null) {
+      final data = jsonDecode(raw) as List;
       setState(() => tasks = data.map((e) => Task.fromJson(e as Map<String, dynamic>)).toList());
     } else {
       setState(() => tasks = [
@@ -108,7 +107,7 @@ class _BoardPageState extends State<BoardPage> {
   }
 
   Future<void> _save() async {
-    await _file?.writeAsString(jsonEncode(tasks.map((t) => t.toJson()).toList()));
+    await _prefs?.setString(_key, jsonEncode(tasks.map((t) => t.toJson()).toList()));
   }
 
   void _move(Task t, String col) {
