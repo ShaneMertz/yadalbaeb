@@ -1,0 +1,39 @@
+name: macOS DMG
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate macOS platform files
+        run: flutter create --platforms=macos --org ru.kanbancrm --project-name kanban_crm .
+
+      - name: Build
+        run: |
+          flutter pub get
+          flutter build macos --release
+
+      - name: Make DMG
+        run: |
+          APP=$(ls -d build/macos/Build/Products/Release/*.app | head -1)
+          mkdir -p dmg
+          cp -R "$APP" "dmg/Kanban CRM.app"
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname "Kanban CRM" -srcfolder dmg -ov -format UDZO KanbanCRM.dmg
+          ls -lh KanbanCRM.dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KanbanCRM-dmg
+          path: KanbanCRM.dmg
